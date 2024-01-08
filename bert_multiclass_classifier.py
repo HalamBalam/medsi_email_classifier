@@ -46,4 +46,4 @@ class BertMulticlassClassifier:
 
         predictions = torch.sigmoid(outputs).cpu().detach().numpy().tolist()
 
-        return np.array(predictions) >= 0.5
+        return (np.array(predictions) >= 0.5)[0]
