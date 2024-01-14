@@ -4,7 +4,7 @@ from transformers import BertTokenizer
 
 class BertMulticlassClassifier:
     def __init__(self):
-        self.model = torch.load('bert_multiclass.pt', map_location=torch.device('cpu'))
+        self.model = torch.load('/models/bert_multiclass.pt', map_location=torch.device('cpu'))
         self.tokenizer = BertTokenizer.from_pretrained('cointegrated/rubert-tiny')
         self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
         self.max_len = 512

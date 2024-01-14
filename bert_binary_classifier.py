@@ -5,7 +5,7 @@ from transformers import BertTokenizer
 class BertBinaryClassifier:
 
     def __init__(self):
-        self.model = torch.load('bert_binary.pt')
+        self.model = torch.load('/models/bert_binary.pt')
         self.tokenizer = BertTokenizer.from_pretrained('cointegrated/rubert-tiny')
         self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
         self.max_len = 512
