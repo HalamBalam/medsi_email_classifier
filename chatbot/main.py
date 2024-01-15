@@ -185,7 +185,7 @@ def preprocessing_message(message):
 def processing_txt_documents(message):
     global result
     # Прочитайте данные из Excel-файла в DataFrame
-    df = pd.read_excel('Справочник_услуг.xlsx')
+    df = pd.read_excel('../datasets/spravochnik.xlsx')
     # подключаемся к базе
     con = sl.connect('bd_biomind.db')
     cur = con.cursor()
