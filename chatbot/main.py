@@ -1,12 +1,16 @@
-import telebot
-from telebot import types
 # модуль для работы с базой данных
 import sqlite3 as sl
-from bert_binary_classifier import BertBinaryClassifier
-from distilbert_class import DistilBERTClass
-from bert_multiclass_classifier import BertMulticlassClassifier
+import pandas as pd
+from openpyxl import Workbook
 # модуль работы со временем
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
+
+import telebot
+from telebot import types
+
+from bert_binary_classifier import BertBinaryClassifier
+from bert_multiclass_classifier import BertMulticlassClassifier
+from distilbert_class import DistilBERTClass
 
 BOT_TOKEN = 'TOKEN'
 bot = telebot.TeleBot(BOT_TOKEN)
@@ -47,15 +51,17 @@ with con:
                     """)
 
 
+# Функция обработчика команды /hello
 @bot.message_handler(commands=[COMMAND_HELLO])
 def start(message):
     bot.send_message(message.chat.id, text=f'Привет, {message.from_user.username}!'
                                            f'\nЯ BioMind Bot создан для извлечения текстовой информации из '
                                            f'гарантийных писем.'
                                            f'\n\nУ меня есть следующие команды: '
-                                           f'\n\n/help\n\n/stop\n\n/reset\n\n/start\n\n/output')
+                                           f'\n\n/help\n\n/reset\n\n/start\n\n/output')
 
 
+# Функция обработчика команды /help
 @bot.message_handler(commands=[COMMAND_HELP])
 def cmd_reset(message):
     bot.send_message(message.chat.id,
@@ -68,13 +74,14 @@ def cmd_reset(message):
     bot.send_message(message.chat.id, text='Выход в главное меню по команде /hello')
 
 
+# Функция обработчика команды /stop для разработчика
 @bot.message_handler(commands=['stop'])
 def stop(message):
     con = sl.connect('bd_biomind.db')
     cur = con.cursor()
-    # cur.execute("DELETE FROM bd_biomind")  # Удаляем все записи из таблицы
+    #cur.execute("DELETE FROM bd_biomind")  # Удаляем все записи из таблицы
     cur.execute("DROP TABLE bd_biomind")
-    con.commit()  # Не забывайте подтверждать изменения
+    con.commit()  # Подтверждаем изменения
     bot.send_message(message.chat.id,
                      text=f'BioMind завершает свою работу, если хотите снова ко мне обратиться, то напишите мне '
                           f'"/start"!'
@@ -83,6 +90,7 @@ def stop(message):
     bot.stop_polling()
 
 
+# Функция обработчика команды /reset
 @bot.message_handler(commands=["reset"])
 def cmd_reset(message):
     con = sl.connect('bd_biomind.db')
@@ -92,9 +100,9 @@ def cmd_reset(message):
     cur.execute("DELETE FROM bd_biomind WHERE user_id=?", (user_id_to_delete,))
     con.commit()
     bot.send_message(message.chat.id, text="Ваши данные были удалены из базы данных"
-                                           "\nХотите продолжить? /start"
-                                           "\nЕсли нет, то /stop")
+                                           "\nВыход в главное меню - /hello")
     con.close()
+    bot.stop_polling()
 
 
 # Функция обработчика команды /output
@@ -106,8 +114,9 @@ def output_user_data(message):
     try:
         # Создание объекта cursor для выполнения SQL-запросов
         cursor = conn.cursor()
+
         # SQL-запрос для получения данных пользователя
-        query = """ SELECT date, text, code_service, class_classification FROM bd_biomind WHERE user_id=? """
+        query = """ SELECT date, text, description_service FROM bd_biomind WHERE user_id=? """
         cursor.execute(query, (user_id,))
 
         # Получение всех строк
@@ -119,7 +128,7 @@ def output_user_data(message):
             for i, row in enumerate(rows):
                 # Текст обрезается до 50 символов
                 text_preview = row[1][:30]
-                response += f'[{i}]\nДата: {row[0]};\nТекст: {text_preview}...;\nКод услуги: {row[2]};\nКлассификация: {row[3]};\n\n'
+                response += f'[{i}]\nДата: {row[0]};\nТекст: {text_preview}...;\nУслуги: {row[2]};\n\n'
 
             bot.send_message(message.chat.id, response)
         else:
@@ -135,6 +144,7 @@ def output_user_data(message):
             conn.close()
 
 
+# Функция обработчика команды /start
 @bot.message_handler(commands=[COMMAND_START])
 def main(message):
     # Создаём кнопки
@@ -146,6 +156,7 @@ def main(message):
     bot.register_next_step_handler(msg, preprocessing_message)
 
 
+# Функция обработчика текста
 @bot.message_handler(content_types=['text'])
 def preprocessing_message(message):
     if message.text == "TXT":
@@ -173,6 +184,8 @@ def preprocessing_message(message):
 
 def processing_txt_documents(message):
     global result
+    # Прочитайте данные из Excel-файла в DataFrame
+    df = pd.read_excel('Справочник_услуг.xlsx')
     # подключаемся к базе
     con = sl.connect('bd_biomind.db')
     cur = con.cursor()
@@ -226,51 +239,67 @@ def processing_txt_documents(message):
     binary_classifier = BertBinaryClassifier()
     class_predict = binary_classifier.predict(result)
 
-    # Формируем SQL-запрос на обновление самой последней записи по datetime для конкретного пользователя
-    update_query = """
+    update_table = """
                         UPDATE bd_biomind
-                        SET class_classification = ?, code_service = ?
+                        SET class_classification = ?,
+                            code_service = ?,
+                            description_service = ?
                         WHERE user_id = ?
                         AND datetime = (
-                            SELECT MAX(datetime)
-                            FROM bd_biomind
-                            WHERE user_id = ?
-                        )
-                        """
+                        SELECT MAX(datetime)
+                        FROM bd_biomind
+                        WHERE user_id = ?
+                                        )"""
 
-    # После обновления записи в базе данных оповещаем пользователя, если это необходимо
+    # Если класс письма 1 - есть услуги
     if class_predict == 1:
         multiclass_classifier = BertMulticlassClassifier()
         code_service_predict = multiclass_classifier.predict(str(result))
         # Получение списка индексов услуг, предоставляемых пользователю
         services_provided = [index for index, value in enumerate(code_service_predict) if value]
+
         if services_provided:
+            # Фильтрация DataFrame для получения соответствующих значений ServiceCode и ServiceName
+            relevant_services = df[df['service_id'].isin(services_provided)]
+            # Создание объединенной строки со значением "ServiceCode ServiceName"
+            combined_service_info = relevant_services.apply(
+                lambda row: f"{row['ServiceCode']}: {row['ServiceName']}", axis=1
+            ).str.cat(sep=';\n')
+
             # Отправляем пользователю сообщение со списком кодов услуг
-            bot.send_message(user_id, f'Коды предоставляемых услуг: {services_provided}', parse_mode='Markdown')
+            bot.send_message(user_id, f'Предоставляемые услуги:\n{combined_service_info}', parse_mode='Markdown')
             bot.send_message(user_id, text="Выход в главное меню /hello", parse_mode='Markdown')
-            # Выполняем запрос с данными: предсказанный класс и ID пользователя
+
+            # Подготовка значений для обновления
+            update_values = (int(class_predict), str(services_provided), combined_service_info)
+            # Выполняем запрос с данными: обновляем таблицу
             with con:
-                # Здесь предполагается, что services_provided_str - это строка, которую хотим записать в code_service
-                cur.execute(update_query, (int(class_predict), str(services_provided), user_id, user_id))
+                cur.execute(update_table,  (*update_values, user_id, user_id))
                 con.commit()
+
         else:
             class_predict = 0
+            combined_service_info = 'Нет услуг'
             bot.send_message(user_id, f'Услуги не найдены: {class_predict}', parse_mode='Markdown')
             bot.send_message(user_id, text="Выход в главное меню /hello", parse_mode='Markdown')
-            # Выполняем запрос с данными: предсказанный класс и ID пользователя
+
+            update_values = (int(class_predict), str(services_provided), combined_service_info)
             with con:
-                # Здесь предполагается, что services_provided_str - это строка, которую хотим записать в code_service
-                cur.execute(update_query, (int(class_predict), str(services_provided), user_id, user_id))
+                cur.execute(update_table, (*update_values, user_id, user_id))
                 con.commit()
-            con.close()
+
+        con.close()
 
     else:
         class_predict = 0
         bot.send_message(user_id, f'Услуги не найдены: {class_predict}', parse_mode='Markdown')
         bot.send_message(user_id, text="Выход в главное меню /hello", parse_mode='Markdown')
+
+        update_values = (int(class_predict), str(0), str('Нет услуг'))
         with con:
-            cur.execute(update_query, (int(class_predict), str(0), user_id, user_id))
+            cur.execute(update_table, (*update_values, user_id, user_id))
             con.commit()
+
         con.close()
 
 
@@ -284,11 +313,11 @@ def processing_docx_documents(message):
 
 bot.enable_save_next_step_handlers(delay=2)
 bot.load_next_step_handlers()
-bot.infinity_polling()
-# while True:
-#     # в бесконечном цикле постоянно опрашиваем бота — есть ли новые сообщения
-#     try:
-#         bot.polling(none_stop=True, interval=0)
-#     # если возникла ошибка — сообщаем про исключение и продолжаем работу
-#     except Exception as e:
-#         print('❌❌❌❌❌ Сработало исключение! ❌❌❌❌❌')
+#bot.infinity_polling()
+while True:
+    # в бесконечном цикле постоянно опрашиваем бота — есть ли новые сообщения
+    try:
+        bot.polling(none_stop=True, interval=0)
+    # если возникла ошибка — сообщаем про исключение и продолжаем работу
+    except Exception as e:
+        print('❌❌❌❌❌ Сработало исключение! ❌❌❌❌❌')
