@@ -20,6 +20,7 @@ class BertMulticlassClassifier:
             add_special_tokens=True,
             max_length=self.max_len,
             pad_to_max_length=True,
+            truncation=True,
             return_token_type_ids=True
         )
         ids_list = []
